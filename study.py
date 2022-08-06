@@ -1,95 +1,169 @@
+from itertools import product
 import tkinter as tk
 from tkinter import HORIZONTAL, VERTICAL, ttk
+from multiprocessing import Process, Manager, Lock, Queue
+
+from traitlets import Bool
+from time import sleep
 
 
-class Switch(ttk.Frame):
-    def __init__(self, parent, screenwidth, screenheight):
+class App_study(ttk.Frame):
+
+    def __init__(self, parent, screenwidth = 300, screenheight = 200):
         ttk.Frame.__init__(self)
 
-        self.winfo_screenwidth = screenwidth
-        self.winfo_screenheight = screenheight
+        # set winfo
+        self.parent = parent
 
-        # Make the app responsive
-        for index in [0, 1, 2]:
-            self.columnconfigure(index=index, weight=1)
-            self.rowconfigure(index=index, weight=1)
+        self.producer_count = 2
+        self.consumer_count = 2
+        self.project_num    = 100
 
-        # Create value lists
-        self.option_menu_list = ["", "OptionMenu", "Option 1", "Option 2"]
-        self.combo_list = ["Combobox", "Editable item 1", "Editable item 2"]
-        self.readonly_combo_list = ["Readonly combobox", "Item 1", "Item 2"]
+        self.manger = Share()
+        self.Work = Work(self.manger, self.producer_count, self.consumer_count, self.project_num)
 
         # Create control variables
-        self.var_0 = tk.BooleanVar()
-        self.var_1 = tk.BooleanVar(value=True)
-        self.var_2 = tk.BooleanVar()
-        self.var_3 = tk.IntVar(value=2)
-        self.var_4 = tk.StringVar(value=self.option_menu_list[1])
-        self.var_5 = tk.DoubleVar(value=75.0)
+        self.treeview_data = { x : tk.StringVar(value="start init....") for x in range (self.producer_count) }
+        self.test = tk.StringVar(value="start init....")
+
+        print(self.test)
 
         # Create widgets :)
         self.setup_widgets()
 
+        self.set_win_center()
 
     def setup_widgets(self):
 
         # Panedwindow
-        self.paned = ttk.PanedWindow(self, orient="horizontal")
-        self.paned.grid(
-            row=0, column=0, padx=(10, 10), pady=(10, 10), rowspan=3, columnspan=3, sticky="nsew"
+        self.paned = ttk.PanedWindow(self)
+        self.paned.grid(row=0, column=2, pady=(25, 5), sticky="nsew", rowspan=3)
+
+        # Pane #1
+        self.pane_1 = ttk.Frame(self.paned, padding=5)
+        self.paned.add(self.pane_1, weight=1)
+
+        # Scrollbar
+        self.scrollbar = ttk.Scrollbar(self.pane_1)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Treeview
+        self.treeview = ttk.Treeview(
+            self.pane_1,
+            selectmode="browse",
+            yscrollcommand=self.scrollbar.set,
+            show="headings",
+            columns=(0, 1),
+            height=10,
         )
+        self.treeview.pack(expand=True, fill="both")
+        self.scrollbar.config(command=self.treeview.yview)
 
-        # Notebook, pane #2
-        self.pane_1 = ttk.Frame(self.paned, padding=10)
-        self.paned.add(self.pane_1, weight=4)
+        # Treeview columns
+        self.treeview.column(0, anchor="w", width=120)
+        self.treeview.column(1, anchor="w", width=120)
 
-        # Notebook, pane #2
-        self.notebook = ttk.Notebook(self.pane_1)
+        # Treeview headings
+        self.treeview.heading(0, text="生产者编号", anchor="center")
+        self.treeview.heading(1, text="生产者信息", anchor="center")
 
-        # Tab #1
-        self.tab_1 = ttk.Frame(self.notebook)
-        for index in [0, 1]:
-            self.tab_1.columnconfigure(index=index, weight=1)
-            self.tab_1.rowconfigure(index=index, weight=1)
-        self.notebook.pack(fill="both", side = "right", expand=True)
-        self.notebook.add(self.tab_1, text="状态")
+        # Insert treeview data
+        for item in range (self.producer_count):
 
-        # Tab #2
-        self.tab_2 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_2, text="信息")
+            self.treeview.insert(
+                "", index="end", iid=item, values=[ f"生产者{item}", self.treeview_data[item].get()]
+            )
 
-        # Progressbar
-        self.progress = ttk.Progressbar(
-            self.tab_1, value=0, variable=self.var_5, mode="determinate"
-        )
-        self.progress.grid(row=0, column=1, padx=(10, 20), pady=(20, 0), sticky="ew")
-        # Label
-        self.label = ttk.Label(
-            self.tab_1,
-            text="Azure theme for ttk",
-            justify="center",
-            font=("-size", 15, "-weight", "bold"),
-        )
-        self.label.grid(row=1, column=0, pady=10, columnspan=2)
+    def set_win_center(self):
+
+        # Set the window size can not change, and place it in the middle
+        self.parent.update()
+        self.parent.minsize(self.parent.winfo_width(), self.parent.winfo_height())
+        x_cordinate = int((self.parent.winfo_screenwidth() / 2) - (self.parent.winfo_width() / 2))
+        y_cordinate = int((self.parent.winfo_screenheight() / 2) - (self.parent.winfo_height() / 2))
+        self.parent.geometry("+{}+{}".format(x_cordinate, y_cordinate-20))
+
+
+class Share:
+    def __init__(self) -> None:
+
+        self.messages     = Queue(200)
+        self.project      = Manager().list([0,0])
+        self.project_lock = Manager().Lock()
+
+        pass
+
+
+class Work:
+    def __init__(self, manger, producer_count, consumer_count, project_num) -> None:
+
+        self.manger          = manger
+        self.manger.project[0]  = project_num
+
+        self.producer = { x : "" for x in range (producer_count) }
+        self.consumer = { x : "" for x in range (consumer_count) }
+
+        for x in range (producer_count):
+
+            producer = Process(target=self.run_producer, args=(x,))
+            producer.daemon = True
+            producer.start()
+
+        pass
+
+    def run_producer(self, id) -> None:
+
+        count = 0
+
+        while True:
+
+            self.manger.project_lock.acquire()
+
+            if self.func():
+
+                count = self.manger.project[1]
+
+            else:
+
+                count = self.manger.project[0] + 1
+
+            self.manger.project_lock.release()
+
+            if count > self.manger.project[0] :
+
+                print("{} 结束生产任务".format(id))
+                self.manger.messages.put("{} 结束生产任务".format(id))
+                break
+
+            print("{} 生产出第 {} 张票".format(id, count))
+            self.manger.messages.put("{} 生产出第 {} 张票".format(id, count))
+
+            sleep(2)
+
+    def func(self) -> Bool:
+
+        if self.manger.project[1] < self.manger.project[0]:
+
+            self.manger.project[1] += 1
+
+            return True
+
+        else:
+
+            return False
+
 
 if __name__ == "__main__":
+
     surface = tk.Tk()
     surface.title("study")
     surface.resizable(0, 0)
+
     # Simply set the theme
     surface.tk.call("source", "azure.tcl")
     surface.tk.call("set_theme", "light")
 
-    winfo_screenwidth = 1000
-    winfo_screenheight = 500
-
-    switch = Switch(surface, winfo_screenwidth, winfo_screenheight)
-    switch.pack(fill="both", expand=True)
-
-    # Set the window size can not change, and place it in the middle
-    surface.update()
-    x_cordinate = int((surface.winfo_screenwidth() / 2) - (winfo_screenwidth / 2))
-    y_cordinate = int((surface.winfo_screenheight() / 2) - (winfo_screenheight / 2))
-    surface.geometry("{}x{}+{}+{}".format(winfo_screenwidth,winfo_screenheight,x_cordinate, y_cordinate-20))
+    root = App_study(surface)
+    root.pack(fill="both", expand=True)
 
     surface.mainloop()
